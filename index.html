@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>CrewCall — South Portland Metro APA</title>
+<!--
+  ============================================================================
+  CrewCall — index.html  (public, phone-first, guided walkthrough)
+  ============================================================================
+  Brief: tools/claude/briefs/2026-08-24-player-team-requests.md  (T1)
+  Go-forward successor to CrewFinder (Apps/TeamCaptainTinder).
+
+  TWO PATHS (one question per screen — Typeform pattern, research-backed):
+    • "I'm looking for a team"  → nights, formats, willing-to-play areas
+      (positive/willingness framing + optional favorite), "about me".
+    • "I need a player"         → which of YOUR current teams, 8- & 9-ball
+      skill range, "what kind of person" — ONE player per request.
+
+  AUTH: NickPick magic-link model. Enter email/APA# → link emailed to the
+  address on file → clicking it (?token=) ACTIVATES a durable device session
+  stored in localStorage (crewcall_session). The token IS the session; Log out
+  revokes it. All POSTs go to the GAS apa-mailer as text/plain (NEVER
+  application/json — that triggers a CORS preflight GAS can't answer).
+
+  Guided from the first screen; a persistent "Start over" returns to the very
+  beginning at every step (confirm if answers exist). Inline validation on
+  blur; Next disabled until the current screen is valid.
+  ============================================================================
+-->
+<style>
+  :root{
+    --spm-primary:#ea002a; --spm-accent:#0031a1;
+    --ink:#15181f; --muted:#5b6473; --line:#e3e7ee; --bg:#f4f6fa; --card:#fff;
+    --ok:#0a7d33; --radius:16px; --tap:52px;
+  }
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  html{font-size:17px}
+  body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink);
+       background:var(--bg);line-height:1.5;min-height:100vh;min-height:100dvh;display:flex;flex-direction:column}
+  .wrap{width:100%;max-width:560px;margin:0 auto;flex:1;display:flex;flex-direction:column;
+        padding:0 18px calc(18px + env(safe-area-inset-bottom))}
+  /* Header */
+  .top{position:sticky;top:0;z-index:5;background:var(--bg);padding:14px 0 8px;
+       display:flex;align-items:center;gap:10px}
+  .brand{font-weight:800;letter-spacing:.3px;font-size:1.15rem;
+         background:linear-gradient(90deg,var(--spm-primary),var(--spm-accent));
+         -webkit-background-clip:text;background-clip:text;color:transparent;white-space:nowrap}
+  .top .sp{flex:1}
+  .lnk{background:none;border:none;color:var(--muted);font:inherit;font-size:.85rem;cursor:pointer;
+       padding:8px;border-radius:10px}
+  .lnk:hover{background:#eceff5;color:var(--ink)}
+  /* Progress */
+  .prog{height:6px;background:#e6eaf2;border-radius:99px;overflow:hidden;margin:2px 0 16px}
+  .prog>i{display:block;height:100%;background:linear-gradient(90deg,var(--spm-primary),var(--spm-accent));
+          width:0;transition:width .3s ease}
+  .stepno{font-size:.78rem;color:var(--muted);margin-bottom:6px;letter-spacing:.3px}
+  /* Card / screen */
+  .screen{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+          padding:22px 20px;box-shadow:0 1px 3px rgba(20,24,31,.04);animation:pop .25s ease}
+  @keyframes pop{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  h1{font-size:1.45rem;line-height:1.25;margin-bottom:6px}
+  h2{font-size:1.28rem;line-height:1.3;margin-bottom:6px}
+  .hint{color:var(--muted);font-size:.95rem;margin-bottom:16px}
+  .grow{flex:1}
+  /* Big choice buttons (the fork) */
+  .choice{display:block;width:100%;text-align:left;background:#fff;border:2px solid var(--line);
+          border-radius:14px;padding:18px;margin-top:12px;font:inherit;cursor:pointer;
+          min-height:var(--tap);transition:border-color .15s,background .15s}
+  .choice:hover,.choice:focus-visible{border-color:var(--spm-accent);background:#f7f9ff;outline:none}
+  .choice b{display:block;font-size:1.08rem;margin-bottom:2px}
+  .choice span{color:var(--muted);font-size:.9rem}
+  /* Chips (multi / single select) */
+  .chips{display:flex;flex-wrap:wrap;gap:10px;margin-top:4px}
+  .chip{border:2px solid var(--line);background:#fff;border-radius:999px;padding:11px 16px;
+        font:inherit;font-size:.98rem;cursor:pointer;min-height:var(--tap);display:inline-flex;align-items:center;gap:7px}
+  .chip[aria-pressed="true"]{border-color:var(--spm-accent);background:#eef2ff;color:var(--spm-accent);font-weight:600}
+  .chip .tick{opacity:0;font-weight:700}
+  .chip[aria-pressed="true"] .tick{opacity:1}
+  /* Team cards */
+  .team{display:block;width:100%;text-align:left;border:2px solid var(--line);background:#fff;
+        border-radius:12px;padding:14px 16px;margin-top:10px;font:inherit;cursor:pointer;min-height:var(--tap)}
+  .team[aria-pressed="true"]{border-color:var(--spm-accent);background:#eef2ff}
+  .team b{display:block}.team span{color:var(--muted);font-size:.88rem}
+  /* Inputs */
+  label.fld{display:block;font-size:.9rem;color:var(--muted);margin:14px 0 6px}
+  input[type=text],input[type=email],textarea,select{
+    width:100%;font:inherit;padding:13px 14px;border:2px solid var(--line);border-radius:12px;background:#fff;
+    min-height:var(--tap);color:var(--ink)}
+  textarea{min-height:110px;resize:vertical}
+  input:focus,textarea:focus,select:focus{outline:none;border-color:var(--spm-accent)}
+  .range{display:flex;align-items:center;gap:10px}
+  .range select{flex:1}
+  .range span{color:var(--muted)}
+  /* Buttons */
+  .row{display:flex;gap:10px;margin-top:20px}
+  .btn{flex:1;font:inherit;font-weight:700;border:none;border-radius:12px;padding:15px;cursor:pointer;
+       min-height:var(--tap)}
+  .btn.primary{background:var(--spm-primary);color:#fff}
+  .btn.primary:disabled{background:#f0bcc6;cursor:not-allowed}
+  .btn.ghost{background:#eef1f6;color:var(--ink);flex:0 0 auto;padding:15px 18px}
+  .err{color:var(--spm-primary);font-size:.9rem;margin-top:10px;min-height:1.1em}
+  .ok{color:var(--ok)}
+  .review dl{margin-top:6px}
+  .review .item{border-top:1px solid var(--line);padding:12px 0;display:flex;gap:12px;align-items:flex-start}
+  .review .item:first-child{border-top:none}
+  .review dt{flex:0 0 40%;color:var(--muted);font-size:.9rem}
+  .review dd{flex:1;font-weight:600;word-break:break-word}
+  .review .edit{background:none;border:none;color:var(--spm-accent);font:inherit;font-size:.85rem;cursor:pointer;padding:0}
+  .callout{background:#fff6f7;border:1px solid #f6c9d1;border-radius:12px;padding:12px 14px;margin-top:14px;
+           font-size:.92rem;color:#8a1226}
+  .center{text-align:center}
+  .big-emoji{font-size:2.4rem;display:block;margin-bottom:8px}
+  .foot{color:var(--muted);font-size:.78rem;text-align:center;padding:18px 0 4px}
+  .spin{display:inline-block;width:18px;height:18px;border:3px solid #d7deea;border-top-color:var(--spm-accent);
+        border-radius:50%;animation:sp .7s linear infinite;vertical-align:-3px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <span class="brand">CrewCall</span>
+    <span class="sp"></span>
+    <button class="lnk" id="startOver" hidden>✕ Start over</button>
+    <button class="lnk" id="logout" hidden>Log out</button>
+  </div>
+  <div id="progWrap" hidden>
+    <div class="stepno" id="stepNo"></div>
+    <div class="prog"><i id="progBar"></i></div>
+  </div>
+  <main id="app" class="grow"></main>
+  <div class="foot">South Portland Metro APA · Have Fun. Meet People. Play Pool.</div>
+</div>
+
+<script>
+"use strict";
+/* ── config ─────────────────────────────────────────────────────────────── */
+var GAS_URL = 'https://script.google.com/macros/s/AKfycbzGTzkBRTrIIP_tD6sbtOOUmNZkXDdtxPoO4c8fdWt5h3tZFueNSISPv8Q3LWStx73Whw/exec';
+var SKEY = 'crewcall_session';   // durable session token (the magic-link token itself)
+var MKEY = 'crewcall_mode';      // remember the chosen path across the email round-trip
+
+var DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+var FORMATS = ['8-Ball','9-Ball','Masters','Ladies','Doubles'];
+var AREAS = ['Milwaukie','Oregon City','Tigard','Beaverton','Hillsboro'];
+
+/* ── state ──────────────────────────────────────────────────────────────── */
+var S = {
+  token: null,          // active session token
+  signedIn: false,
+  firstName: '',
+  mode: null,           // 'seeking_team' | 'seeking_player'
+  teams: [],            // for seeking_player
+  step: 0,
+  A: {}                 // answers
+};
+var app = document.getElementById('app');
+
+/* ── GAS call (text/plain — no CORS preflight) ──────────────────────────── */
+function gas(action, extra){
+  var payload = Object.assign({ action: action }, extra || {});
+  return fetch(GAS_URL, { method:'POST', body: JSON.stringify(payload) })
+    .then(function(r){ return r.json(); })
+    .catch(function(){ return { ok:false, error:'Network hiccup. Check your connection and try again.' }; });
+}
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+
+/* ── header chrome ──────────────────────────────────────────────────────── */
+function chrome(){
+  var anyAnswer = S.mode && (S.step>0 || Object.keys(S.A).length>0);
+  document.getElementById('startOver').hidden = !S.mode;
+  document.getElementById('logout').hidden = !S.signedIn;
+  var showProg = !!S.mode && S.view==='step';
+  document.getElementById('progWrap').hidden = !showProg;
+  if(showProg){
+    var steps = activeSteps();
+    var n = steps.length, i = Math.min(S.step, n-1);
+    document.getElementById('stepNo').textContent = 'Step '+(i+1)+' of '+n;
+    document.getElementById('progBar').style.width = Math.round(((i+1)/n)*100)+'%';
+  }
+}
+document.getElementById('startOver').onclick = function(){
+  var anyAnswer = S.step>0 || Object.keys(S.A).length>0;
+  if(anyAnswer && !confirm('Start over? Your answers on this request will be cleared.')) return;
+  S.mode=null; S.step=0; S.A={};
+  try{ localStorage.removeItem(MKEY); }catch(e){}
+  showFork();
+};
+document.getElementById('logout').onclick = function(){
+  gas('crew_logout', { token: S.token });
+  try{ localStorage.removeItem(SKEY); localStorage.removeItem(MKEY); }catch(e){}
+  S.token=null; S.signedIn=false; S.mode=null; S.step=0; S.A={}; S.firstName='';
+  showFork();
+};
+
+/* ── step definitions (per path) ────────────────────────────────────────── */
+function stepsFor(mode){
+  if(mode==='seeking_team') return [
+    { id:'days',    type:'multi',  required:false, options:DAYS,
+      title:'Which nights can you play?', hint:'Pick all that work — leave blank if you’re flexible on nights.' },
+    { id:'formats', type:'multi',  required:false, options:FORMATS,
+      title:'Which formats are you up for?', hint:'Pick any that interest you, or leave blank for any.' },
+    { id:'areas',   type:'multi',  required:true,  options:AREAS,
+      title:'Which areas would you play in?', hint:'Pick every area you’d play in — the more you pick, the more teams we can match you with.' },
+    { id:'preferred', type:'single-of-areas', required:false, options:AREAS,
+      title:'Which is your first choice?', hint:'Optional — helps us match you closer to home. Tap to pick, or skip.',
+      showIf:function(){ return (S.A.areas||[]).length>=2; } },
+    { id:'about',   type:'textarea', required:false, max:1000,
+      title:'What’s one thing you’d want a potential team to know about you?',
+      hint:'A sentence or two — your vibe, experience, what you’re after. Optional.' }
+  ];
+  return [
+    { id:'team',   type:'team',   required:true,
+      title:'Which of your teams is this for?', hint:'We pulled these from your current-session roster.' },
+    { id:'sl8',    type:'range',  required:false, lo:1, hi:7,
+      title:'8-Ball skill range you’re looking for', hint:'Leave on “Any” if it doesn’t matter.' },
+    { id:'sl9',    type:'range',  required:false, lo:1, hi:9,
+      title:'9-Ball skill range you’re looking for', hint:'Leave on “Any” if it doesn’t matter.' },
+    { id:'looking',type:'textarea', required:false, max:1000,
+      title:'What kind of person are you looking for?',
+      hint:'Reliability, vibe, availability — whatever matters to you. Optional.',
+      callout:'This request is for ONE player. Need more? Finish this one, then submit another request.' }
+  ];
+}
+function activeSteps(){ return stepsFor(S.mode).filter(function(s){ return !s.showIf || s.showIf(); }); }
+
+/* ── screen: welcome + fork ─────────────────────────────────────────────── */
+function showFork(){
+  S.view='fork'; chrome();
+  app.innerHTML =
+    '<div class="screen">'+
+      '<h1>What brings you to the table?</h1>'+
+      '<p class="hint">'+(S.firstName?('Hi '+esc(S.firstName)+'! '):'')+'Pick one to get started.</p>'+
+      '<button class="choice" id="fT"><b>👥 I’m looking for a team</b><span>You want to get on a roster this session.</span></button>'+
+      '<button class="choice" id="fP"><b>🎱 I need a player for my team</b><span>You’re a captain who needs one more.</span></button>'+
+    '</div>';
+  document.getElementById('fT').onclick = function(){ pickMode('seeking_team'); };
+  document.getElementById('fP').onclick = function(){ pickMode('seeking_player'); };
+}
+function pickMode(mode){
+  S.mode=mode; S.step=0; S.A={};
+  try{ localStorage.setItem(MKEY, mode); }catch(e){}
+  if(!S.signedIn){ showLogin(); return; }
+  if(mode==='seeking_player'){ loadTeamsThenStart(); } else { startSteps(); }
+}
+
+/* ── screen: login (email/APA → magic link) ─────────────────────────────── */
+function showLogin(prefillErr){
+  S.view='login'; chrome();
+  app.innerHTML =
+    '<div class="screen">'+
+      '<h2>First, let’s confirm it’s you</h2>'+
+      '<p class="hint">Enter your email or APA number. We’ll send a one-tap sign-in link to the email on file. No password.</p>'+
+      '<label class="fld" for="ident">Email or APA number</label>'+
+      '<input id="ident" type="text" autocomplete="email" inputmode="email" placeholder="you@example.com or 8-digit APA #">'+
+      '<input id="hp" type="text" style="position:absolute;left:-9999px" tabindex="-1" autocomplete="off" aria-hidden="true">'+
+      '<div class="err" id="err">'+esc(prefillErr||'')+'</div>'+
+      '<div class="row">'+
+        '<button class="btn ghost" id="back">Back</button>'+
+        '<button class="btn primary" id="send">Send my link</button>'+
+      '</div>'+
+    '</div>';
+  document.getElementById('back').onclick = showFork;
+  var send = document.getElementById('send');
+  send.onclick = function(){
+    var v = document.getElementById('ident').value.trim();
+    var err = document.getElementById('err');
+    if(!v){ err.textContent='Enter your email or APA number.'; return; }
+    send.disabled=true; send.innerHTML='<span class="spin"></span>';
+    gas('crew_link_request', { identifier:v, hp:document.getElementById('hp').value }).then(function(res){
+      send.disabled=false; send.textContent='Send my link';
+      if(!res.ok){ err.textContent=res.error||'Something went wrong. Try again.'; return; }
+      showSent(v);
+    });
+  };
+  document.getElementById('ident').addEventListener('keydown',function(e){ if(e.key==='Enter') send.click(); });
+}
+function showSent(dest){
+  S.view='sent'; chrome();
+  app.innerHTML =
+    '<div class="screen center">'+
+      '<span class="big-emoji">📧</span>'+
+      '<h2>Check your email</h2>'+
+      '<p class="hint">If we found you, a sign-in link is on its way to your email on file. Tap it on this device to keep going. The link works for 30 minutes.</p>'+
+      '<div class="row"><button class="btn ghost" id="back">Back</button>'+
+      '<button class="btn primary" id="resend">Resend link</button></div>'+
+      '<div class="err" id="err"></div>'+
+    '</div>';
+  document.getElementById('back').onclick = showLogin;
+  document.getElementById('resend').onclick = function(){
+    var b=this; b.disabled=true; b.innerHTML='<span class="spin"></span>';
+    gas('crew_link_request', { identifier:dest }).then(function(res){
+      b.disabled=false; b.textContent='Resend link';
+      document.getElementById('err').innerHTML = res.ok
+        ? '<span class="ok">Sent again — check your inbox.</span>'
+        : esc(res.error||'Could not resend.');
+    });
+  };
+}
+
+/* ── steps ──────────────────────────────────────────────────────────────── */
+function loadTeamsThenStart(){
+  S.view='loading'; chrome();
+  app.innerHTML = '<div class="screen center"><span class="spin"></span><p class="hint" style="margin-top:12px">Finding your teams…</p></div>';
+  gas('crew_my_teams', { token:S.token }).then(function(res){
+    if(!res.ok){ handleSessionErr(res.error); return; }
+    S.teams = res.teams||[];
+    if(!S.teams.length){
+      app.innerHTML = '<div class="screen"><h2>Hmm — no current team found</h2>'+
+        '<p class="hint">We couldn’t find a team for you in the current session. If that’s a mistake, contact the league office and we’ll sort it out.</p>'+
+        '<div class="row"><button class="btn ghost" id="b">Back</button></div></div>';
+      document.getElementById('b').onclick = showFork; return;
+    }
+    if(S.teams.length===1){ S.A.team = S.teams[0].team_id; }  // preselect the only team
+    startSteps();
+  });
+}
+function startSteps(){ S.step=0; renderStep(); }
+
+function renderStep(){
+  S.view='step';
+  var steps = activeSteps();
+  if(S.step>=steps.length){ showReview(); return; }
+  var st = steps[S.step];
+  chrome();
+  var body='';
+  if(st.type==='multi' || st.type==='single-of-areas'){
+    var opts = st.type==='single-of-areas' ? (S.A.areas||[]) : st.options;
+    var sel = S.A[st.id];
+    body = '<div class="chips">'+ opts.map(function(o){
+      var on = st.type==='multi' ? (sel||[]).indexOf(o)>=0 : sel===o;
+      return '<button class="chip" role="button" aria-pressed="'+(on?'true':'false')+'" data-v="'+esc(o)+'"><span class="tick">✓</span>'+esc(o)+'</button>';
+    }).join('') +'</div>';
+  } else if(st.type==='team'){
+    body = S.teams.map(function(t){
+      var on = String(S.A.team)===String(t.team_id);
+      var sub = [t.division_name, t.format, t.night_of_play].filter(Boolean).join(' · ');
+      return '<button class="team" aria-pressed="'+(on?'true':'false')+'" data-v="'+esc(t.team_id)+'">'+
+        '<b>'+esc(t.team_name||('Team '+t.team_number))+'</b>'+(sub?'<span>'+esc(sub)+'</span>':'')+'</button>';
+    }).join('');
+  } else if(st.type==='range'){
+    var v = S.A[st.id]||{min:'',max:''};
+    function optsFor(lo,hi,cur){ var s='<option value="">Any</option>'; for(var i=lo;i<=hi;i++){ s+='<option value="'+i+'"'+(String(cur)===String(i)?' selected':'')+'>SL '+i+'</option>'; } return s; }
+    body = '<div class="range"><select id="mn">'+optsFor(st.lo,st.hi,v.min)+'</select>'+
+           '<span>to</span><select id="mx">'+optsFor(st.lo,st.hi,v.max)+'</select></div>';
+  } else if(st.type==='textarea'){
+    body = '<textarea id="ta" maxlength="'+(st.max||1000)+'" placeholder="Type here…">'+esc(S.A[st.id]||'')+'</textarea>';
+  }
+  app.innerHTML =
+    '<div class="screen">'+
+      '<h2>'+esc(st.title)+'</h2>'+
+      (st.hint?'<p class="hint">'+esc(st.hint)+'</p>':'')+
+      body+
+      (st.callout?'<div class="callout">'+esc(st.callout)+'</div>':'')+
+      '<div class="err" id="err"></div>'+
+      '<div class="row">'+
+        (S.step>0?'<button class="btn ghost" id="back">Back</button>':'')+
+        '<button class="btn primary" id="next">'+(S.step===steps.length-1?'Review':'Next')+'</button>'+
+      '</div>'+
+    '</div>';
+
+  // wire chips / teams
+  Array.prototype.forEach.call(app.querySelectorAll('.chip,.team'), function(el){
+    el.onclick = function(){
+      var val = el.getAttribute('data-v');
+      if(st.type==='multi'){
+        var arr = S.A[st.id]||[]; var i=arr.indexOf(val);
+        if(i>=0) arr.splice(i,1); else arr.push(val);
+        S.A[st.id]=arr; el.setAttribute('aria-pressed', i>=0?'false':'true');
+      } else { // single-of-areas or team
+        var cur = st.type==='team'? S.A.team : S.A[st.id];
+        var isOn = String(cur)===String(val);
+        if(st.type==='team'){ S.A.team = isOn? null : val; } else { S.A[st.id] = isOn? null : val; }
+        Array.prototype.forEach.call(app.querySelectorAll('.chip,.team'), function(o){ o.setAttribute('aria-pressed','false'); });
+        if(!isOn) el.setAttribute('aria-pressed','true');
+      }
+      document.getElementById('err').textContent='';
+    };
+  });
+  if(st.type==='range'){
+    document.getElementById('mn').onchange = document.getElementById('mx').onchange = function(){
+      S.A[st.id] = { min:document.getElementById('mn').value, max:document.getElementById('mx').value };
+    };
+  }
+  if(st.type==='textarea'){
+    document.getElementById('ta').oninput = function(){ S.A[st.id]=this.value; };
+  }
+  if(S.step>0) document.getElementById('back').onclick = function(){ S.step--; renderStep(); };
+  document.getElementById('next').onclick = function(){
+    var e = validateStep(st);
+    if(e){ document.getElementById('err').textContent=e; return; }
+    S.step++; renderStep();
+  };
+}
+function validateStep(st){
+  if(st.type==='multi' && st.required && !(S.A[st.id]||[]).length) return 'Pick at least one to continue.';
+  if(st.type==='team' && st.required && !S.A.team) return 'Pick which team this request is for.';
+  if(st.type==='range'){
+    var v=S.A[st.id]; if(v && v.min && v.max && Number(v.min)>Number(v.max)) return 'The low end can’t be higher than the high end.';
+  }
+  return '';
+}
+
+/* ── review ─────────────────────────────────────────────────────────────── */
+function fmtVal(id){
+  var a=S.A;
+  if(id==='days')    return (a.days||[]).join(', ') || 'Flexible';
+  if(id==='formats') return (a.formats||[]).join(', ') || 'Any';
+  if(id==='areas')   return (a.areas||[]).join(', ');
+  if(id==='preferred') return a.preferred || 'No preference';
+  if(id==='about')   return a.about || '—';
+  if(id==='team'){ var t=S.teams.filter(function(x){return String(x.team_id)===String(a.team);})[0]; return t?(t.team_name||('Team '+t.team_number)):'—'; }
+  if(id==='sl8'||id==='sl9'){ var v=a[id]||{}; if(!v.min && !v.max) return 'Any'; return 'SL '+(v.min||'?')+' to '+(v.max||'?'); }
+  if(id==='looking') return a.looking || '—';
+  return '';
+}
+function showReview(){
+  S.view='review'; chrome();
+  var steps = activeSteps();
+  var rows = steps.map(function(st,idx){
+    return '<div class="item"><dt>'+esc(shortLabel(st))+'</dt><dd>'+esc(fmtVal(st.id))+
+      ' <button class="edit" data-i="'+idx+'">Edit</button></dd></div>';
+  }).join('');
+  app.innerHTML =
+    '<div class="screen review">'+
+      '<h2>Look good?</h2>'+
+      '<p class="hint">Double-check, then send it in. We’ll email you a copy.</p>'+
+      '<dl>'+rows+'</dl>'+
+      '<div class="err" id="err"></div>'+
+      '<div class="row"><button class="btn ghost" id="back">Back</button>'+
+      '<button class="btn primary" id="submit">Send my request</button></div>'+
+    '</div>';
+  Array.prototype.forEach.call(app.querySelectorAll('.edit'), function(b){
+    b.onclick=function(){ S.step=Number(b.getAttribute('data-i')); renderStep(); };
+  });
+  document.getElementById('back').onclick = function(){ S.step=steps.length-1; renderStep(); };
+  document.getElementById('submit').onclick = submit;
+}
+function shortLabel(st){
+  return { days:'Nights', formats:'Formats', areas:'Areas', preferred:'First choice',
+           about:'About you', team:'Team', sl8:'8-Ball SL', sl9:'9-Ball SL', looking:'Looking for' }[st.id] || st.id;
+}
+
+/* ── submit ─────────────────────────────────────────────────────────────── */
+function submit(){
+  var b=document.getElementById('submit'); b.disabled=true; b.innerHTML='<span class="spin"></span>';
+  var payload = { token:S.token, kind:S.mode, source:'crewcall-web' };
+  if(S.mode==='seeking_team'){
+    payload.days=S.A.days||[]; payload.formats=S.A.formats||[]; payload.areas=S.A.areas||[];
+    payload.preferred_area=S.A.preferred||''; payload.about=S.A.about||'';
+  } else {
+    payload.team_id=S.A.team;
+    payload.sl8_min=(S.A.sl8||{}).min||''; payload.sl8_max=(S.A.sl8||{}).max||'';
+    payload.sl9_min=(S.A.sl9||{}).min||''; payload.sl9_max=(S.A.sl9||{}).max||'';
+    payload.looking_for=S.A.looking||'';
+  }
+  gas('crew_submit', payload).then(function(res){
+    b.disabled=false; b.textContent='Send my request';
+    if(!res.ok){
+      if(/session/i.test(res.error||'')){ handleSessionErr(res.error); return; }
+      document.getElementById('err').textContent = res.error||'Something went wrong. Try again.'; return;
+    }
+    showDone();
+  });
+}
+function showDone(){
+  S.view='done'; S.step=0; var wasMode=S.mode; S.mode=null; S.A={};
+  try{ localStorage.removeItem(MKEY); }catch(e){}
+  chrome();
+  app.innerHTML =
+    '<div class="screen center">'+
+      '<span class="big-emoji">🎉</span>'+
+      '<h2>You’re all set!</h2>'+
+      '<p class="hint">Your request is in and we emailed you a copy. We’ll help make the connection. '+
+        (wasMode==='seeking_player'?'Need another player? Submit a second request below.':'Good luck out there!')+'</p>'+
+      '<div class="row"><button class="btn primary" id="again">Submit another request</button></div>'+
+    '</div>';
+  document.getElementById('again').onclick = showFork;
+}
+
+/* ── session error recovery ─────────────────────────────────────────────── */
+function handleSessionErr(msg){
+  try{ localStorage.removeItem(SKEY); }catch(e){}
+  S.token=null; S.signedIn=false;
+  showLogin(msg||'Your session expired. Sign in again to finish.');
+}
+
+/* ── boot: resolve session (magic-link token or stored) ─────────────────── */
+function boot(){
+  var urlToken = new URLSearchParams(location.search).get('token');
+  var stored = null; try{ stored = localStorage.getItem(SKEY); }catch(e){}
+  var tok = urlToken || stored;
+  try{ S.mode = localStorage.getItem(MKEY) || null; }catch(e){}
+  if(urlToken){ history.replaceState(null,'',location.pathname); }   // strip token from the URL
+  if(!tok){ showFork(); return; }
+  app.innerHTML = '<div class="screen center"><span class="spin"></span><p class="hint" style="margin-top:12px">Signing you in…</p></div>';
+  gas('crew_verify', { token:tok }).then(function(res){
+    if(!res.ok){
+      try{ localStorage.removeItem(SKEY); }catch(e){}
+      // Fresh magic-link that failed → show login with the reason; stored-session fail → silent fork.
+      if(urlToken) showLogin(res.error||'That link didn’t work. Request a fresh one.'); else showFork();
+      return;
+    }
+    S.token=tok; S.signedIn=true; S.firstName=res.first_name||'';
+    try{ localStorage.setItem(SKEY, tok); }catch(e){}
+    // Resume the remembered path, else the fork.
+    if(S.mode==='seeking_player'){ loadTeamsThenStart(); }
+    else if(S.mode==='seeking_team'){ startSteps(); }
+    else showFork();
+  });
+}
+boot();
+</script>
+</body>
+</html>
