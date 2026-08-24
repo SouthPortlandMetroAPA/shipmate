@@ -11,126 +11,89 @@
   Brief: tools/claude/briefs/2026-08-24-player-team-requests.md  (T1)
   Go-forward successor to CrewFinder (Apps/TeamCaptainTinder).
 
+  Branding: sources the shared SPM palette + components (spm-base.css) — same
+  gradient header banner, 22px cards, 999px gradient-pill buttons as every other
+  SPM app. App-specific bits (wizard chips, progress) override below.
+
   TWO PATHS (one question per screen — Typeform pattern, research-backed):
     • "I'm looking for a team"  → nights, formats, willing-to-play areas
       (positive/willingness framing + optional favorite), "about me".
-    • "I need a player"         → which of YOUR current teams, 8- & 9-ball
-      skill range, "what kind of person" — ONE player per request.
+    • "I need a player"         → which of YOUR current teams, skill range for
+      the format(s) that team plays, "what kind of person" — ONE player/request.
+      A Double Jeopardy team shows as ONE button and asks BOTH 8- & 9-ball
+      ranges; a single-format team asks only its format's range.
 
-  AUTH: NickPick magic-link model. Enter email/APA# → link emailed to the
-  address on file → clicking it (?token=) ACTIVATES a durable device session
-  stored in localStorage (crewcall_session). The token IS the session; Log out
-  revokes it. All POSTs go to the GAS apa-mailer as text/plain (NEVER
-  application/json — that triggers a CORS preflight GAS can't answer).
-
-  Guided from the first screen; a persistent "Start over" returns to the very
-  beginning at every step (confirm if answers exist). Inline validation on
-  blur; Next disabled until the current screen is valid.
+  AUTH: NickPick magic-link model. email/APA# → link to the address on file →
+  ?token= activates a durable localStorage session. Token IS the session.
+  All POSTs go to the GAS apa-mailer as text/plain (never application/json).
   ============================================================================
 -->
+<link rel="stylesheet" href="https://southportlandmetroapa.github.io/shared/spm-base.css">
 <style>
-  :root{
-    --spm-primary:#ea002a; --spm-accent:#0031a1;
-    --ink:#15181f; --muted:#5b6473; --line:#e3e7ee; --bg:#f4f6fa; --card:#fff;
-    --ok:#0a7d33; --radius:16px; --tap:52px;
-  }
-  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-  html{font-size:17px}
-  body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink);
-       background:var(--bg);line-height:1.5;min-height:100vh;min-height:100dvh;display:flex;flex-direction:column}
-  .wrap{width:100%;max-width:560px;margin:0 auto;flex:1;display:flex;flex-direction:column;
-        padding:0 18px calc(18px + env(safe-area-inset-bottom))}
-  /* Header */
-  .top{position:sticky;top:0;z-index:5;background:var(--bg);padding:14px 0 8px;
-       display:flex;align-items:center;gap:10px}
-  .brand{font-weight:800;letter-spacing:.3px;font-size:1.15rem;
-         background:linear-gradient(90deg,var(--spm-primary),var(--spm-accent));
-         -webkit-background-clip:text;background-clip:text;color:transparent;white-space:nowrap}
-  .top .sp{flex:1}
-  .lnk{background:none;border:none;color:var(--muted);font:inherit;font-size:.85rem;cursor:pointer;
-       padding:8px;border-radius:10px}
-  .lnk:hover{background:#eceff5;color:var(--ink)}
-  /* Progress */
-  .prog{height:6px;background:#e6eaf2;border-radius:99px;overflow:hidden;margin:2px 0 16px}
-  .prog>i{display:block;height:100%;background:linear-gradient(90deg,var(--spm-primary),var(--spm-accent));
-          width:0;transition:width .3s ease}
-  .stepno{font-size:.78rem;color:var(--muted);margin-bottom:6px;letter-spacing:.3px}
-  /* Card / screen */
-  .screen{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
-          padding:22px 20px;box-shadow:0 1px 3px rgba(20,24,31,.04);animation:pop .25s ease}
-  @keyframes pop{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-  h1{font-size:1.45rem;line-height:1.25;margin-bottom:6px}
-  h2{font-size:1.28rem;line-height:1.3;margin-bottom:6px}
-  .hint{color:var(--muted);font-size:.95rem;margin-bottom:16px}
-  .grow{flex:1}
-  /* Big choice buttons (the fork) */
-  .choice{display:block;width:100%;text-align:left;background:#fff;border:2px solid var(--line);
-          border-radius:14px;padding:18px;margin-top:12px;font:inherit;cursor:pointer;
-          min-height:var(--tap);transition:border-color .15s,background .15s}
-  .choice:hover,.choice:focus-visible{border-color:var(--spm-accent);background:#f7f9ff;outline:none}
-  .choice b{display:block;font-size:1.08rem;margin-bottom:2px}
-  .choice span{color:var(--muted);font-size:.9rem}
-  /* Chips (multi / single select) */
-  .chips{display:flex;flex-wrap:wrap;gap:10px;margin-top:4px}
-  .chip{border:2px solid var(--line);background:#fff;border-radius:999px;padding:11px 16px;
-        font:inherit;font-size:.98rem;cursor:pointer;min-height:var(--tap);display:inline-flex;align-items:center;gap:7px}
-  .chip[aria-pressed="true"]{border-color:var(--spm-accent);background:#eef2ff;color:var(--spm-accent);font-weight:600}
-  .chip .tick{opacity:0;font-weight:700}
-  .chip[aria-pressed="true"] .tick{opacity:1}
-  /* Team cards */
-  .team{display:block;width:100%;text-align:left;border:2px solid var(--line);background:#fff;
-        border-radius:12px;padding:14px 16px;margin-top:10px;font:inherit;cursor:pointer;min-height:var(--tap)}
-  .team[aria-pressed="true"]{border-color:var(--spm-accent);background:#eef2ff}
-  .team b{display:block}.team span{color:var(--muted);font-size:.88rem}
-  /* Inputs */
-  label.fld{display:block;font-size:.9rem;color:var(--muted);margin:14px 0 6px}
-  input[type=text],input[type=email],textarea,select{
-    width:100%;font:inherit;padding:13px 14px;border:2px solid var(--line);border-radius:12px;background:#fff;
-    min-height:var(--tap);color:var(--ink)}
-  textarea{min-height:110px;resize:vertical}
-  input:focus,textarea:focus,select:focus{outline:none;border-color:var(--spm-accent)}
-  .range{display:flex;align-items:center;gap:10px}
-  .range select{flex:1}
-  .range span{color:var(--muted)}
-  /* Buttons */
-  .row{display:flex;gap:10px;margin-top:20px}
-  .btn{flex:1;font:inherit;font-weight:700;border:none;border-radius:12px;padding:15px;cursor:pointer;
-       min-height:var(--tap)}
-  .btn.primary{background:var(--spm-primary);color:#fff}
-  .btn.primary:disabled{background:#f0bcc6;cursor:not-allowed}
-  .btn.ghost{background:#eef1f6;color:var(--ink);flex:0 0 auto;padding:15px 18px}
-  .err{color:var(--spm-primary);font-size:.9rem;margin-top:10px;min-height:1.1em}
-  .ok{color:var(--ok)}
-  .review dl{margin-top:6px}
-  .review .item{border-top:1px solid var(--line);padding:12px 0;display:flex;gap:12px;align-items:flex-start}
-  .review .item:first-child{border-top:none}
-  .review dt{flex:0 0 40%;color:var(--muted);font-size:.9rem}
-  .review dd{flex:1;font-weight:600;word-break:break-word}
-  .review .edit{background:none;border:none;color:var(--spm-accent);font:inherit;font-size:.85rem;cursor:pointer;padding:0}
-  .callout{background:#fff6f7;border:1px solid #f6c9d1;border-radius:12px;padding:12px 14px;margin-top:14px;
-           font-size:.92rem;color:#8a1226}
-  .center{text-align:center}
-  .big-emoji{font-size:2.4rem;display:block;margin-bottom:8px}
-  .foot{color:var(--muted);font-size:.78rem;text-align:center;padding:18px 0 4px}
-  .spin{display:inline-block;width:18px;height:18px;border:3px solid #d7deea;border-top-color:var(--spm-accent);
-        border-radius:50%;animation:sp .7s linear infinite;vertical-align:-3px}
-  @keyframes sp{to{transform:rotate(360deg)}}
+  :root{ --ok:#0a7d33; --tap:52px; }
+  body{ min-height:100vh; min-height:100dvh; display:flex; flex-direction:column; }
+  .spm-page{ max-width:600px; flex:1; display:flex; flex-direction:column; }
+  .cc-ctl{ display:flex; align-items:center; gap:8px; margin:-4px 0 12px; min-height:24px; }
+  .cc-ctl .sp{ flex:1; }
+  .stepno{ font-size:.78rem; color:var(--muted); letter-spacing:.3px; }
+  .cc-lnk{ background:none; border:none; color:var(--muted); font:inherit; font-size:.85rem; cursor:pointer; padding:6px 8px; border-radius:10px; }
+  .cc-lnk:hover{ background:#eceff5; color:var(--text); }
+  .cc-prog{ height:6px; background:#e6eaf2; border-radius:99px; overflow:hidden; margin:0 0 14px; }
+  .cc-prog>i{ display:block; height:100%; background:linear-gradient(135deg,var(--spm-primary),var(--spm-accent)); width:0; transition:width .3s ease; }
+  .screen{ background:var(--card); border:1px solid var(--border); border-radius:22px; padding:22px 20px; box-shadow:0 3px 10px rgba(0,0,0,.1); animation:pop .25s ease; }
+  @keyframes pop{ from{opacity:0; transform:translateY(6px)} to{opacity:1; transform:none} }
+  .screen h2{ font-size:1.3rem; line-height:1.3; margin:0 0 6px; font-weight:900; letter-spacing:-.02em; }
+  .hint{ color:var(--muted); margin:0 0 16px; }
+  .grow{ flex:1; }
+  .choice{ display:block; width:100%; text-align:left; background:#fff; border:2px solid var(--border); border-radius:16px; padding:18px; margin-top:12px; font:inherit; cursor:pointer; min-height:var(--tap); transition:border-color .15s,background .15s; }
+  .choice:hover,.choice:focus-visible{ border-color:var(--spm-accent); background:#f7f9ff; outline:none; }
+  .choice b{ display:block; font-size:1.08rem; margin-bottom:2px; }
+  .choice span{ color:var(--muted); font-size:.9rem; }
+  .chips{ display:flex; flex-wrap:wrap; gap:10px; margin-top:4px; }
+  .chip{ border:2px solid var(--border); background:#fff; border-radius:999px; padding:11px 16px; font:inherit; font-size:.98rem; cursor:pointer; min-height:var(--tap); display:inline-flex; align-items:center; gap:7px; color:var(--text); }
+  .chip[aria-pressed="true"]{ border-color:var(--spm-accent); background:#eef2ff; color:var(--spm-accent); font-weight:600; }
+  .chip .tick{ opacity:0; font-weight:700; }
+  .chip[aria-pressed="true"] .tick{ opacity:1; }
+  .team{ display:block; width:100%; text-align:left; border:2px solid var(--border); background:#fff; border-radius:14px; padding:14px 16px; margin-top:10px; font:inherit; cursor:pointer; min-height:var(--tap); }
+  .team[aria-pressed="true"]{ border-color:var(--spm-accent); background:#eef2ff; }
+  .team b{ display:block; } .team span{ color:var(--muted); font-size:.88rem; }
+  label.fld{ display:block; font-size:.9rem; color:var(--muted); margin:14px 0 6px; }
+  input[type=text],input[type=email],textarea,select{ width:100%; font:inherit; padding:13px 14px; border:2px solid var(--border); border-radius:12px; background:#fff; min-height:var(--tap); color:var(--text); }
+  textarea{ min-height:110px; resize:vertical; }
+  input:focus,textarea:focus,select:focus{ outline:none; border-color:var(--spm-accent); }
+  .range{ display:flex; align-items:center; gap:10px; } .range select{ flex:1; } .range span{ color:var(--muted); }
+  .row{ display:flex; gap:10px; margin-top:20px; }
+  .btn{ flex:1; font:inherit; font-weight:700; font-size:1rem; border:none; border-radius:999px; padding:14px 20px; cursor:pointer; min-height:var(--tap); transition:filter .15s,transform .15s; }
+  .btn:hover{ filter:brightness(1.08); transform:translateY(-1px); } .btn:active{ transform:translateY(0); }
+  .btn.primary{ background:linear-gradient(135deg,var(--spm-primary),var(--spm-accent)); color:#fff; }
+  .btn.primary:disabled{ background:#c9ccd6; cursor:not-allowed; filter:none; transform:none; }
+  .btn.ghost{ background:#fff; color:var(--text); border:2px solid var(--border); flex:0 0 auto; }
+  .err{ color:var(--spm-primary); font-size:.9rem; margin-top:10px; min-height:1.1em; } .err.ok{ color:var(--ok); }
+  .review .item{ border-top:1px solid var(--border); padding:12px 0; display:flex; gap:12px; align-items:flex-start; }
+  .review .item:first-child{ border-top:none; }
+  .review dt{ flex:0 0 38%; color:var(--muted); font-size:.9rem; } .review dd{ flex:1; font-weight:600; word-break:break-word; }
+  .review .edit{ background:none; border:none; color:var(--spm-accent); font:inherit; font-size:.85rem; cursor:pointer; padding:0; }
+  .callout{ background:#fff6f7; border:1px solid #f6c9d1; border-radius:14px; padding:12px 14px; margin-top:14px; font-size:.92rem; color:#8a1226; }
+  .center{ text-align:center; } .big-emoji{ font-size:2.4rem; display:block; margin-bottom:8px; }
+  .spin{ display:inline-block; width:18px; height:18px; border:3px solid #d7deea; border-top-color:var(--spm-accent); border-radius:50%; animation:sp .7s linear infinite; vertical-align:-3px; }
+  @keyframes sp{ to{ transform:rotate(360deg) } }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <div class="top">
-    <span class="brand">CrewCall</span>
+<div class="spm-page">
+  <header class="spm-header">
+    <h1>CrewCall</h1>
+    <p class="spm-subtitle">Find a team &middot; Find a player</p>
+  </header>
+  <div class="cc-ctl" id="ctl" hidden>
+    <span class="stepno" id="stepNo"></span>
     <span class="sp"></span>
-    <button class="lnk" id="startOver" hidden>✕ Start over</button>
-    <button class="lnk" id="logout" hidden>Log out</button>
+    <button class="cc-lnk" id="startOver" hidden>&#10005; Start over</button>
+    <button class="cc-lnk" id="logout" hidden>Log out</button>
   </div>
-  <div id="progWrap" hidden>
-    <div class="stepno" id="stepNo"></div>
-    <div class="prog"><i id="progBar"></i></div>
-  </div>
+  <div class="cc-prog" id="progWrap" hidden><i id="progBar"></i></div>
   <main id="app" class="grow"></main>
-  <div class="foot">South Portland Metro APA · Have Fun. Meet People. Play Pool.</div>
+  <footer class="spm-footer">South Portland Metro APA &middot; Have Fun. Meet People. Play Pool.</footer>
 </div>
 
 <script>
@@ -145,15 +108,7 @@ var FORMATS = ['8-Ball','9-Ball','Masters','Ladies','Doubles'];
 var AREAS = ['Milwaukie','Oregon City','Tigard','Beaverton','Hillsboro'];
 
 /* ── state ──────────────────────────────────────────────────────────────── */
-var S = {
-  token: null,          // active session token
-  signedIn: false,
-  firstName: '',
-  mode: null,           // 'seeking_team' | 'seeking_player'
-  teams: [],            // for seeking_player
-  step: 0,
-  A: {}                 // answers
-};
+var S = { token:null, signedIn:false, firstName:'', mode:null, teams:[], step:0, A:{}, view:null };
 var app = document.getElementById('app');
 
 /* ── GAS call (text/plain — no CORS preflight) ──────────────────────────── */
@@ -167,21 +122,20 @@ function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){retur
 
 /* ── header chrome ──────────────────────────────────────────────────────── */
 function chrome(){
-  var anyAnswer = S.mode && (S.step>0 || Object.keys(S.A).length>0);
   document.getElementById('startOver').hidden = !S.mode;
   document.getElementById('logout').hidden = !S.signedIn;
+  document.getElementById('ctl').hidden = !(S.mode || S.signedIn);
   var showProg = !!S.mode && S.view==='step';
   document.getElementById('progWrap').hidden = !showProg;
+  var stepNo = document.getElementById('stepNo');
   if(showProg){
-    var steps = activeSteps();
-    var n = steps.length, i = Math.min(S.step, n-1);
-    document.getElementById('stepNo').textContent = 'Step '+(i+1)+' of '+n;
+    var steps = activeSteps(); var n = steps.length, i = Math.min(S.step, n-1);
+    stepNo.textContent = 'Step '+(i+1)+' of '+n;
     document.getElementById('progBar').style.width = Math.round(((i+1)/n)*100)+'%';
-  }
+  } else stepNo.textContent = '';
 }
 document.getElementById('startOver').onclick = function(){
-  var anyAnswer = S.step>0 || Object.keys(S.A).length>0;
-  if(anyAnswer && !confirm('Start over? Your answers on this request will be cleared.')) return;
+  if((S.step>0 || Object.keys(S.A).length>0) && !confirm('Start over? Your answers on this request will be cleared.')) return;
   S.mode=null; S.step=0; S.A={};
   try{ localStorage.removeItem(MKEY); }catch(e){}
   showFork();
@@ -192,6 +146,19 @@ document.getElementById('logout').onclick = function(){
   S.token=null; S.signedIn=false; S.mode=null; S.step=0; S.A={}; S.firstName='';
   showFork();
 };
+
+/* ── picked-team helpers (contextual skill ranges) ──────────────────────── */
+function pickedTeam(){
+  var id = S.A.team;
+  for(var i=0;i<(S.teams||[]).length;i++){ if(String(S.teams[i].team_id)===String(id)) return S.teams[i]; }
+  return null;
+}
+function teamPlays(ball){
+  var t = pickedTeam();
+  var f = (t && t.formats && t.formats.length) ? t.formats.join(' ') : '';
+  if(!/[89]/.test(f)) return true;              // unknown / non-8-9 format → show both ranges
+  return f.indexOf(String(ball)) >= 0;
+}
 
 /* ── step definitions (per path) ────────────────────────────────────────── */
 function stepsFor(mode){
@@ -213,9 +180,11 @@ function stepsFor(mode){
     { id:'team',   type:'team',   required:true,
       title:'Which of your teams is this for?', hint:'We pulled these from your current-session roster.' },
     { id:'sl8',    type:'range',  required:false, lo:1, hi:7,
-      title:'8-Ball skill range you’re looking for', hint:'Leave on “Any” if it doesn’t matter.' },
+      title:'8-Ball skill range you’re looking for', hint:'Leave on “Any” if it doesn’t matter.',
+      showIf:function(){ return teamPlays(8); } },
     { id:'sl9',    type:'range',  required:false, lo:1, hi:9,
-      title:'9-Ball skill range you’re looking for', hint:'Leave on “Any” if it doesn’t matter.' },
+      title:'9-Ball skill range you’re looking for', hint:'Leave on “Any” if it doesn’t matter.',
+      showIf:function(){ return teamPlays(9); } },
     { id:'looking',type:'textarea', required:false, max:1000,
       title:'What kind of person are you looking for?',
       hint:'Reliability, vibe, availability — whatever matters to you. Optional.',
@@ -229,7 +198,7 @@ function showFork(){
   S.view='fork'; chrome();
   app.innerHTML =
     '<div class="screen">'+
-      '<h1>What brings you to the table?</h1>'+
+      '<h2>What brings you to the table?</h2>'+
       '<p class="hint">'+(S.firstName?('Hi '+esc(S.firstName)+'! '):'')+'Pick one to get started.</p>'+
       '<button class="choice" id="fT"><b>👥 I’m looking for a team</b><span>You want to get on a roster this session.</span></button>'+
       '<button class="choice" id="fP"><b>🎱 I need a player for my team</b><span>You’re a captain who needs one more.</span></button>'+
@@ -291,9 +260,8 @@ function showSent(dest){
     var b=this; b.disabled=true; b.innerHTML='<span class="spin"></span>';
     gas('crew_link_request', { identifier:dest }).then(function(res){
       b.disabled=false; b.textContent='Resend link';
-      document.getElementById('err').innerHTML = res.ok
-        ? '<span class="ok">Sent again — check your inbox.</span>'
-        : esc(res.error||'Could not resend.');
+      var err=document.getElementById('err');
+      err.className='err'+(res.ok?' ok':''); err.textContent = res.ok ? 'Sent again — check your inbox.' : (res.error||'Could not resend.');
     });
   };
 }
@@ -334,7 +302,7 @@ function renderStep(){
   } else if(st.type==='team'){
     body = S.teams.map(function(t){
       var on = String(S.A.team)===String(t.team_id);
-      var sub = [t.division_name, t.format, t.night_of_play].filter(Boolean).join(' · ');
+      var sub = [t.format, t.night_of_play, t.division_name].filter(Boolean).join(' · ');
       return '<button class="team" aria-pressed="'+(on?'true':'false')+'" data-v="'+esc(t.team_id)+'">'+
         '<b>'+esc(t.team_name||('Team '+t.team_number))+'</b>'+(sub?'<span>'+esc(sub)+'</span>':'')+'</button>';
     }).join('');
@@ -359,7 +327,6 @@ function renderStep(){
       '</div>'+
     '</div>';
 
-  // wire chips / teams
   Array.prototype.forEach.call(app.querySelectorAll('.chip,.team'), function(el){
     el.onclick = function(){
       var val = el.getAttribute('data-v');
@@ -367,7 +334,7 @@ function renderStep(){
         var arr = S.A[st.id]||[]; var i=arr.indexOf(val);
         if(i>=0) arr.splice(i,1); else arr.push(val);
         S.A[st.id]=arr; el.setAttribute('aria-pressed', i>=0?'false':'true');
-      } else { // single-of-areas or team
+      } else {
         var cur = st.type==='team'? S.A.team : S.A[st.id];
         var isOn = String(cur)===String(val);
         if(st.type==='team'){ S.A.team = isOn? null : val; } else { S.A[st.id] = isOn? null : val; }
@@ -382,9 +349,7 @@ function renderStep(){
       S.A[st.id] = { min:document.getElementById('mn').value, max:document.getElementById('mx').value };
     };
   }
-  if(st.type==='textarea'){
-    document.getElementById('ta').oninput = function(){ S.A[st.id]=this.value; };
-  }
+  if(st.type==='textarea'){ document.getElementById('ta').oninput = function(){ S.A[st.id]=this.value; }; }
   if(S.step>0) document.getElementById('back').onclick = function(){ S.step--; renderStep(); };
   document.getElementById('next').onclick = function(){
     var e = validateStep(st);
@@ -409,7 +374,7 @@ function fmtVal(id){
   if(id==='areas')   return (a.areas||[]).join(', ');
   if(id==='preferred') return a.preferred || 'No preference';
   if(id==='about')   return a.about || '—';
-  if(id==='team'){ var t=S.teams.filter(function(x){return String(x.team_id)===String(a.team);})[0]; return t?(t.team_name||('Team '+t.team_number)):'—'; }
+  if(id==='team'){ var t=pickedTeam(); return t?(t.team_name||('Team '+t.team_number)):'—'; }
   if(id==='sl8'||id==='sl9'){ var v=a[id]||{}; if(!v.min && !v.max) return 'Any'; return 'SL '+(v.min||'?')+' to '+(v.max||'?'); }
   if(id==='looking') return a.looking || '—';
   return '';
@@ -491,19 +456,17 @@ function boot(){
   var stored = null; try{ stored = localStorage.getItem(SKEY); }catch(e){}
   var tok = urlToken || stored;
   try{ S.mode = localStorage.getItem(MKEY) || null; }catch(e){}
-  if(urlToken){ history.replaceState(null,'',location.pathname); }   // strip token from the URL
+  if(urlToken){ history.replaceState(null,'',location.pathname); }
   if(!tok){ showFork(); return; }
   app.innerHTML = '<div class="screen center"><span class="spin"></span><p class="hint" style="margin-top:12px">Signing you in…</p></div>';
   gas('crew_verify', { token:tok }).then(function(res){
     if(!res.ok){
       try{ localStorage.removeItem(SKEY); }catch(e){}
-      // Fresh magic-link that failed → show login with the reason; stored-session fail → silent fork.
       if(urlToken) showLogin(res.error||'That link didn’t work. Request a fresh one.'); else showFork();
       return;
     }
     S.token=tok; S.signedIn=true; S.firstName=res.first_name||'';
     try{ localStorage.setItem(SKEY, tok); }catch(e){}
-    // Resume the remembered path, else the fork.
     if(S.mode==='seeking_player'){ loadTeamsThenStart(); }
     else if(S.mode==='seeking_team'){ startSteps(); }
     else showFork();
