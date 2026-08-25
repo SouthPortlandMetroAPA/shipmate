@@ -60,6 +60,19 @@
   .team[aria-pressed="true"]{ border-color:var(--spm-accent); background:#eef2ff; }
   .team b{ display:block; } .team span{ display:block; color:var(--muted); font-size:.88rem; margin-top:2px; }
   .team-venue{ color:var(--spm-accent); font-weight:600; }
+  /* seeking_player manage hub */
+  .pr-list{ margin:4px 0 6px; }
+  .pr-card{ display:flex; gap:8px; align-items:stretch; margin-top:10px; }
+  .pr-main{ flex:1 1 auto; text-align:left; border:2px solid var(--border); background:#fff; border-radius:14px; padding:12px 14px; font:inherit; cursor:pointer; min-height:var(--tap); }
+  .pr-main b{ display:block; }
+  .pr-main span{ display:block; font-size:.85rem; color:var(--muted); margin-top:2px; }
+  .pr-main .pr-sl{ color:var(--spm-accent); font-weight:600; }
+  .pr-main .pr-look{ font-style:italic; }
+  .pr-main .pr-edit{ color:var(--spm-primary); font-weight:700; margin-top:6px; }
+  .pr-cancel{ flex:0 0 auto; border:2px solid var(--border); background:#fff; border-radius:14px; padding:0 14px; font:inherit; font-size:.82rem; color:var(--muted); cursor:pointer; }
+  .pr-cancel:hover{ border-color:var(--spm-primary); color:var(--spm-primary); }
+  .pr-banner{ background:#e6f7ec; border:1px solid #b7e4c7; color:#0a7d33; font-weight:600; border-radius:12px; padding:10px 14px; margin-bottom:12px; }
+  .btn.block{ width:100%; }
   label.fld{ display:block; font-size:.9rem; color:var(--muted); margin:14px 0 6px; }
   input[type=text],input[type=email],textarea,select{ width:100%; font:inherit; padding:13px 14px; border:2px solid var(--border); border-radius:12px; background:#fff; min-height:var(--tap); color:var(--text); }
   textarea{ min-height:110px; resize:vertical; }
@@ -221,7 +234,7 @@ function pickMode(mode){
   S.mode=mode; S.step=0; S.A={}; S.editingId=null;
   try{ localStorage.setItem(MKEY, mode); }catch(e){}
   if(!S.signedIn){ showLogin(); return; }
-  if(mode==='seeking_player'){ loadTeamsThenStart(); } else { checkOpenThenStart(); }
+  if(mode==='seeking_player'){ loadTeamsThenHub(); } else { checkOpenThenStart(); }
 }
 
 /* seeking_team: one open request per player. If they already have one, manage it
@@ -258,18 +271,20 @@ function startEdit(req){
   S.A = { days:req.days||[], max_teams:req.max_teams||'', formats:req.formats||[], areas:req.areas||[], preferred:req.preferred_area||'', about:req.about||'' };
   startSteps();
 }
-function showCancel(req){
+function showCancel(req, opts){
+  opts = opts || {}; var isPlayer = opts.kind==='player';
   S.view='cancel'; chrome();
-  var REASONS = ['Found a team','No longer available','Changed my mind','Other'];
+  var REASONS = isPlayer ? ['Found a player','Filled the spot','No longer needed','Other']
+                         : ['Found a team','No longer available','Changed my mind','Other'];
   app.innerHTML =
     '<div class="screen">'+
-      '<h2>Cancel your request?</h2>'+
+      '<h2>Cancel this '+(isPlayer?'player request':'request')+'?</h2>'+
       '<p class="hint">Pick a reason (required) so we can keep improving matches. Add detail if you like.</p>'+
       '<div class="chips">'+REASONS.map(function(r){ return '<button class="chip" role="button" aria-pressed="false" data-v="'+esc(r)+'"><span class="tick">✓</span>'+esc(r)+'</button>'; }).join('')+'</div>'+
       '<label class="fld" for="cd">Anything else? (optional)</label><textarea id="cd" maxlength="500" placeholder="Optional detail"></textarea>'+
       '<div class="err" id="err"></div>'+
       '<div class="row"><button class="btn ghost" id="back">Back</button>'+
-      '<button class="btn primary" id="doCancel" disabled>Cancel my request</button></div>'+
+      '<button class="btn primary" id="doCancel" disabled>Cancel '+(isPlayer?'this request':'my request')+'</button></div>'+
     '</div>';
   var reason=null;
   Array.prototype.forEach.call(app.querySelectorAll('.chip'), function(el){
@@ -277,17 +292,17 @@ function showCancel(req){
       Array.prototype.forEach.call(app.querySelectorAll('.chip'),function(o){ o.setAttribute('aria-pressed','false'); });
       el.setAttribute('aria-pressed','true'); document.getElementById('doCancel').disabled=false; document.getElementById('err').textContent=''; };
   });
-  document.getElementById('back').onclick=function(){ showManage(req); };
+  document.getElementById('back').onclick=function(){ if(isPlayer) showPlayerHub(S.playerReqs||[]); else showManage(req); };
   document.getElementById('doCancel').onclick=function(){
     if(!reason){ document.getElementById('err').textContent='Pick a reason first.'; return; }
     var detail=document.getElementById('cd').value.trim();
     var full = reason + (detail? (' — '+detail) : '');
     var b=this; b.disabled=true; b.innerHTML='<span class="spin"></span>';
     gas('crew_cancel',{ token:S.token, request_id:req.id, reason:full }).then(function(res){
-      if(!res.ok){ b.disabled=false; b.textContent='Cancel my request';
+      if(!res.ok){ b.disabled=false; b.textContent=isPlayer?'Cancel this request':'Cancel my request';
         if(/session/i.test(res.error||'')){ handleSessionErr(res.error); return; }
         document.getElementById('err').textContent=res.error||'Could not cancel. Try again.'; return; }
-      showCancelled();
+      if(isPlayer) refreshPlayerHub('Request cancelled.'); else showCancelled();
     });
   };
 }
@@ -355,10 +370,16 @@ function showSent(dest){
   };
 }
 
-/* ── steps ──────────────────────────────────────────────────────────────── */
-function loadTeamsThenStart(){
+/* ── seeking_player: teams → manage hub ─────────────────────────────────────
+   A captain can keep several open "need a player" requests (one per player). So we
+   don't block a second submit — instead, once they have any open request we show a HUB
+   that LISTS their requests (tap to edit, or cancel) with one primary "request another".
+   Every submit/edit/cancel returns to that hub (never a dead-end). First request (none
+   open yet) skips the hub and goes straight into the steps — fewest taps to the goal. */
+function ccSpin(msg){ return '<div class="screen center"><span class="spin"></span><p class="hint" style="margin-top:12px">'+esc(msg)+'</p></div>'; }
+function loadTeamsThenHub(){
   S.view='loading'; chrome();
-  app.innerHTML = '<div class="screen center"><span class="spin"></span><p class="hint" style="margin-top:12px">Finding your teams…</p></div>';
+  app.innerHTML = ccSpin('Finding your teams…');
   gas('crew_my_teams', { token:S.token }).then(function(res){
     if(!res.ok){ handleSessionErr(res.error); return; }
     S.teams = res.teams||[];
@@ -368,9 +389,67 @@ function loadTeamsThenStart(){
         '<div class="row"><button class="btn ghost" id="b">Back</button></div></div>';
       document.getElementById('b').onclick = showFork; return;
     }
-    if(S.teams.length===1){ S.A.team = S.teams[0].team_id; }  // preselect the only team
-    startSteps();
+    gas('crew_my_player_requests', { token:S.token }).then(function(r2){
+      if(!r2.ok){ handleSessionErr(r2.error); return; }
+      var reqs = r2.requests||[];
+      if(reqs.length){ showPlayerHub(reqs); } else { startNewPlayerRequest(); }
+    });
   });
+}
+function refreshPlayerHub(banner){
+  S.view='loading'; chrome(); app.innerHTML = ccSpin('Updating…');
+  gas('crew_my_player_requests', { token:S.token }).then(function(r){
+    if(!r.ok){ handleSessionErr(r.error); return; }
+    showPlayerHub(r.requests||[], banner);
+  });
+}
+function startNewPlayerRequest(){
+  S.mode='seeking_player'; S.editingId=null; S.A={};
+  if((S.teams||[]).length===1){ S.A.team = S.teams[0].team_id; }   // preselect the only team
+  startSteps();
+}
+function startEditPlayer(req){
+  if(!req) return;
+  S.mode='seeking_player'; S.editingId=req.id;
+  var s8=req.sl8_min==null&&req.sl8_max==null?null:{min:req.sl8_min==null?'':String(req.sl8_min), max:req.sl8_max==null?'':String(req.sl8_max)};
+  var s9=req.sl9_min==null&&req.sl9_max==null?null:{min:req.sl9_min==null?'':String(req.sl9_min), max:req.sl9_max==null?'':String(req.sl9_max)};
+  S.A = { team:req.team_id, sl8:s8||{min:'',max:''}, sl9:s9||{min:'',max:''}, looking:req.looking_for||'' };
+  startSteps();
+}
+function prVenue(teamId){ for(var i=0;i<(S.teams||[]).length;i++){ if(String(S.teams[i].team_id)===String(teamId)) return S.teams[i].host_location||''; } return ''; }
+function prRange(lo,hi){ if(lo==null&&hi==null) return 'Any'; return (lo==null?'?':lo)+'–'+(hi==null?'?':hi); }
+function showPlayerHub(reqs, banner){
+  S.view='playerhub'; S.mode='seeking_player'; S.playerReqs=reqs; S.editingId=null; S.A={}; chrome();
+  var cards = (reqs||[]).map(function(r){
+    var venue = prVenue(r.team_id);
+    var sub = [r.night_of_play, r.team_format, venue].filter(Boolean).join(' · ');
+    var sl=[]; if(r.sl8_min!=null||r.sl8_max!=null) sl.push('8-Ball '+prRange(r.sl8_min,r.sl8_max));
+    if(r.sl9_min!=null||r.sl9_max!=null) sl.push('9-Ball '+prRange(r.sl9_min,r.sl9_max));
+    return '<div class="pr-card">'+
+        '<button class="pr-main" data-edit="'+esc(r.id)+'">'+
+          '<b>'+esc(r.team_name||('Team '+r.team_number))+'</b>'+
+          (sub?'<span class="pr-sub">'+esc(sub)+'</span>':'')+
+          (sl.length?'<span class="pr-sl">Needs: '+esc(sl.join(' · '))+'</span>':'')+
+          (r.looking_for?'<span class="pr-look">“'+esc(r.looking_for)+'”</span>':'')+
+          '<span class="pr-edit">Tap to edit ›</span>'+
+        '</button>'+
+        '<button class="pr-cancel" data-cancel="'+esc(r.id)+'">Cancel</button>'+
+      '</div>';
+  }).join('');
+  var empty = !(reqs||[]).length;
+  app.innerHTML =
+    '<div class="screen">'+
+      (banner?'<div class="pr-banner">'+esc(banner)+'</div>':'')+
+      '<h2>Your player requests</h2>'+
+      '<p class="hint">'+(empty?'You have no open requests right now.':'Each card is one open request for one player. Tap a card to edit it — or add another below.')+'</p>'+
+      (empty?'':'<div class="pr-list">'+cards+'</div>')+
+      '<div class="row"><button class="btn primary block" id="prNew">＋ Request '+(empty?'a':'another')+' player</button></div>'+
+      '<div class="row"><button class="btn ghost block" id="prBack">Back to start</button></div>'+
+    '</div>';
+  Array.prototype.forEach.call(app.querySelectorAll('[data-edit]'), function(b){ b.onclick=function(){ var id=b.getAttribute('data-edit'); startEditPlayer((reqs||[]).filter(function(x){return String(x.id)===String(id);})[0]); }; });
+  Array.prototype.forEach.call(app.querySelectorAll('[data-cancel]'), function(b){ b.onclick=function(){ var id=b.getAttribute('data-cancel'); showCancel((reqs||[]).filter(function(x){return String(x.id)===String(id);})[0], { kind:'player' }); }; });
+  document.getElementById('prNew').onclick = startNewPlayerRequest;
+  document.getElementById('prBack').onclick = showFork;
 }
 function startSteps(){ S.step=0; renderStep(); }
 
@@ -525,7 +604,10 @@ function submit(){
       if(/session/i.test(res.error||'')){ handleSessionErr(res.error); return; }
       document.getElementById('err').textContent = res.error||'Something went wrong. Try again.'; return;
     }
-    showDone(res.edited);
+    // seeking_player returns to the manage hub (list → edit / add another) — never a dead-end;
+    // seeking_team keeps its single-request done screen.
+    if(S.mode==='seeking_player'){ refreshPlayerHub(res.edited?'✓ Request updated — we emailed you a copy.':'✓ Request posted — we emailed you a copy.'); }
+    else { showDone(res.edited); }
   });
 }
 function showDone(edited){
@@ -567,7 +649,7 @@ function boot(){
     }
     S.token=tok; S.signedIn=true; S.firstName=res.first_name||'';
     try{ localStorage.setItem(SKEY, tok); }catch(e){}
-    if(S.mode==='seeking_player'){ loadTeamsThenStart(); }
+    if(S.mode==='seeking_player'){ loadTeamsThenHub(); }
     else if(S.mode==='seeking_team'){ checkOpenThenStart(); }
     else showFork();
   });
