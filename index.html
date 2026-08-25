@@ -225,7 +225,7 @@ function showFork(){
       '<h2>What brings you to the table?</h2>'+
       '<p class="hint">'+(S.firstName?('Hi '+esc(S.firstName)+'! '):'')+'Pick one to get started.</p>'+
       '<button class="choice" id="fT"><b>👥 I’m looking for a team</b><span>You want to get on a roster this session.</span></button>'+
-      '<button class="choice" id="fP"><b>🎱 I need a player for my team</b><span>You’re a captain who needs one more.</span></button>'+
+      '<button class="choice" id="fP"><b>🎱 I need a player for my team</b><span>You’re a captain or co-captain who needs one more.</span></button>'+
     '</div>';
   document.getElementById('fT').onclick = function(){ pickMode('seeking_team'); };
   document.getElementById('fP').onclick = function(){ pickMode('seeking_player'); };
@@ -384,8 +384,8 @@ function loadTeamsThenHub(){
     if(!res.ok){ handleSessionErr(res.error); return; }
     S.teams = res.teams||[];
     if(!S.teams.length){
-      app.innerHTML = '<div class="screen"><h2>Hmm — no current team found</h2>'+
-        '<p class="hint">We couldn’t find a team for you in the current session. If that’s a mistake, contact the league office and we’ll sort it out.</p>'+
+      app.innerHTML = '<div class="screen"><h2>Only captains can request a player</h2>'+
+        '<p class="hint">Requesting a player is for a team’s <b>captain or co-captain</b> — we couldn’t find a current-session team where you’re one. If that’s a mistake, contact the league office and we’ll sort it out.</p>'+
         '<div class="row"><button class="btn ghost" id="b">Back</button></div></div>';
       document.getElementById('b').onclick = showFork; return;
     }
