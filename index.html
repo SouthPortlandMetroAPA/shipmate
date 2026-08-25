@@ -203,7 +203,7 @@ function stepsFor(mode){
   return [
     { id:'team',   type:'team',   required:true,
       title:'Which of your teams is this for?', hint:'We pulled these from your current-session roster.' },
-    { id:'sl8',    type:'range',  required:false, lo:1, hi:7,
+    { id:'sl8',    type:'range',  required:false, lo:2, hi:7,
       title:'8-Ball skill range you’re looking for', hint:'Leave on “Any” if it doesn’t matter.',
       showIf:function(){ return teamPlays(8); } },
     { id:'sl9',    type:'range',  required:false, lo:1, hi:9,
