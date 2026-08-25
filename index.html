@@ -49,8 +49,10 @@
   .choice:hover,.choice:focus-visible{ border-color:var(--spm-accent); background:#f7f9ff; outline:none; }
   .choice b{ display:block; font-size:1.08rem; margin-bottom:2px; }
   .choice span{ color:var(--muted); font-size:.9rem; }
-  .chips{ display:flex; flex-wrap:wrap; gap:10px; margin-top:4px; }
-  .chip{ border:2px solid var(--border); background:#fff; border-radius:999px; padding:11px 16px; font:inherit; font-size:.98rem; cursor:pointer; min-height:var(--tap); display:inline-flex; align-items:center; gap:7px; color:var(--text); }
+  .chips{ display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px; margin-top:4px; }
+  .chip{ border:2px solid var(--border); background:#fff; border-radius:14px; padding:12px 14px; font:inherit; font-size:.96rem; cursor:pointer; min-height:var(--tap); display:inline-flex; align-items:center; justify-content:center; text-align:center; gap:6px; color:var(--text); white-space:normal; line-height:1.2; }
+  .grp-label{ font-size:.72rem; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); margin:16px 0 8px; }
+  .grp-label.first{ margin-top:4px; }
   .chip[aria-pressed="true"]{ border-color:var(--spm-accent); background:#eef2ff; color:var(--spm-accent); font-weight:600; }
   .chip .tick{ opacity:0; font-weight:700; }
   .chip[aria-pressed="true"] .tick{ opacity:1; }
@@ -104,11 +106,17 @@ var SKEY = 'crewcall_session';   // durable session token (the magic-link token 
 var MKEY = 'crewcall_mode';      // remember the chosen path across the email round-trip
 
 var DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
-var FORMATS = ['8-Ball','9-Ball','8-Ball Doubles','9-Ball Doubles','Double Jeopardy','Double Jeopardy Doubles','Masters','Ladies'];
+var FORMAT_GROUPS = [
+  { label:'Singles', items:['8-Ball','9-Ball','Double Jeopardy'] },
+  { label:'Doubles', items:['8-Ball Doubles','9-Ball Doubles','Double Jeopardy Doubles'] },
+  { label:'Masters & Ladies', items:['Masters','Ladies'] }
+];
+var FORMATS = FORMAT_GROUPS.reduce(function(a,g){ return a.concat(g.items); }, []);
 var AREAS = ['Milwaukie','Oregon City','Tigard','Beaverton','Hillsboro'];
+var TEAM_COUNTS = ['1','2','3','4 or more'];
 
 /* ── state ──────────────────────────────────────────────────────────────── */
-var S = { token:null, signedIn:false, firstName:'', mode:null, teams:[], step:0, A:{}, view:null };
+var S = { token:null, signedIn:false, firstName:'', mode:null, teams:[], step:0, A:{}, view:null, editingId:null, existing:null };
 var app = document.getElementById('app');
 
 /* ── GAS call (text/plain — no CORS preflight) ──────────────────────────── */
@@ -136,14 +144,14 @@ function chrome(){
 }
 document.getElementById('startOver').onclick = function(){
   if((S.step>0 || Object.keys(S.A).length>0) && !confirm('Start over? Your answers on this request will be cleared.')) return;
-  S.mode=null; S.step=0; S.A={};
+  S.mode=null; S.step=0; S.A={}; S.editingId=null;
   try{ localStorage.removeItem(MKEY); }catch(e){}
   showFork();
 };
 document.getElementById('logout').onclick = function(){
   gas('crew_logout', { token: S.token });
   try{ localStorage.removeItem(SKEY); localStorage.removeItem(MKEY); }catch(e){}
-  S.token=null; S.signedIn=false; S.mode=null; S.step=0; S.A={}; S.firstName='';
+  S.token=null; S.signedIn=false; S.mode=null; S.step=0; S.A={}; S.firstName=''; S.editingId=null;
   showFork();
 };
 
@@ -165,7 +173,9 @@ function stepsFor(mode){
   if(mode==='seeking_team') return [
     { id:'days',    type:'multi',  required:false, options:DAYS,
       title:'Which nights can you play?', hint:'Pick all that work — leave blank if you’re flexible on nights.' },
-    { id:'formats', type:'multi',  required:false, options:FORMATS,
+    { id:'max_teams', type:'single', required:false, options:TEAM_COUNTS,
+      title:'How many teams do you want to play on?', hint:'One team is usually one night a week. Pick how many you’re up for — or skip.' },
+    { id:'formats', type:'multi',  groups:FORMAT_GROUPS, required:false,
       title:'Which formats are you up for?', hint:'Pick any that interest you, or leave blank for any.' },
     { id:'areas',   type:'multi',  required:true,  options:AREAS,
       title:'Which areas would you play in?', hint:'Pick every area you’d play in — the more you pick, the more teams we can match you with.' },
@@ -207,10 +217,88 @@ function showFork(){
   document.getElementById('fP').onclick = function(){ pickMode('seeking_player'); };
 }
 function pickMode(mode){
-  S.mode=mode; S.step=0; S.A={};
+  S.mode=mode; S.step=0; S.A={}; S.editingId=null;
   try{ localStorage.setItem(MKEY, mode); }catch(e){}
   if(!S.signedIn){ showLogin(); return; }
-  if(mode==='seeking_player'){ loadTeamsThenStart(); } else { startSteps(); }
+  if(mode==='seeking_player'){ loadTeamsThenStart(); } else { checkOpenThenStart(); }
+}
+
+/* seeking_team: one open request per player. If they already have one, manage it
+   (edit or cancel) instead of starting a second submission. */
+function checkOpenThenStart(){
+  S.view='loading'; chrome();
+  app.innerHTML = '<div class="screen center"><span class="spin"></span><p class="hint" style="margin-top:12px">Checking your requests…</p></div>';
+  gas('crew_my_open', { token:S.token }).then(function(res){
+    if(!res.ok){ handleSessionErr(res.error); return; }
+    if(res.request){ showManage(res.request); } else { S.editingId=null; startSteps(); }
+  });
+}
+function reqLine(l,v){ return '<div class="item"><dt>'+esc(l)+'</dt><dd>'+esc(v)+'</dd></div>'; }
+function showManage(req){
+  S.view='manage'; S.existing=req; chrome();
+  var summary = reqLine('Nights',(req.days||[]).join(', ')||'Flexible')
+    + reqLine('Teams wanted', req.max_teams||'No preference')
+    + reqLine('Formats',(req.formats||[]).join(', ')||'Any')
+    + reqLine('Areas',(req.areas||[]).join(', ')+(req.preferred_area?(' (favorite: '+req.preferred_area+')'):''))
+    + reqLine('About', req.about||'—');
+  app.innerHTML =
+    '<div class="screen review">'+
+      '<h2>You already have a request out</h2>'+
+      '<p class="hint">You’re currently looking for a team, so there’s no need to submit a second one. Update it or cancel it below.</p>'+
+      '<dl>'+summary+'</dl>'+
+      '<div class="row"><button class="btn ghost" id="cancelReq">Cancel request</button>'+
+      '<button class="btn primary" id="editReq">Edit request</button></div>'+
+    '</div>';
+  document.getElementById('editReq').onclick = function(){ startEdit(req); };
+  document.getElementById('cancelReq').onclick = function(){ showCancel(req); };
+}
+function startEdit(req){
+  S.editingId = req.id;
+  S.A = { days:req.days||[], max_teams:req.max_teams||'', formats:req.formats||[], areas:req.areas||[], preferred:req.preferred_area||'', about:req.about||'' };
+  startSteps();
+}
+function showCancel(req){
+  S.view='cancel'; chrome();
+  var REASONS = ['Found a team','No longer available','Changed my mind','Other'];
+  app.innerHTML =
+    '<div class="screen">'+
+      '<h2>Cancel your request?</h2>'+
+      '<p class="hint">Pick a reason (required) so we can keep improving matches. Add detail if you like.</p>'+
+      '<div class="chips">'+REASONS.map(function(r){ return '<button class="chip" role="button" aria-pressed="false" data-v="'+esc(r)+'"><span class="tick">✓</span>'+esc(r)+'</button>'; }).join('')+'</div>'+
+      '<label class="fld" for="cd">Anything else? (optional)</label><textarea id="cd" maxlength="500" placeholder="Optional detail"></textarea>'+
+      '<div class="err" id="err"></div>'+
+      '<div class="row"><button class="btn ghost" id="back">Back</button>'+
+      '<button class="btn primary" id="doCancel" disabled>Cancel my request</button></div>'+
+    '</div>';
+  var reason=null;
+  Array.prototype.forEach.call(app.querySelectorAll('.chip'), function(el){
+    el.onclick=function(){ reason=el.getAttribute('data-v');
+      Array.prototype.forEach.call(app.querySelectorAll('.chip'),function(o){ o.setAttribute('aria-pressed','false'); });
+      el.setAttribute('aria-pressed','true'); document.getElementById('doCancel').disabled=false; document.getElementById('err').textContent=''; };
+  });
+  document.getElementById('back').onclick=function(){ showManage(req); };
+  document.getElementById('doCancel').onclick=function(){
+    if(!reason){ document.getElementById('err').textContent='Pick a reason first.'; return; }
+    var detail=document.getElementById('cd').value.trim();
+    var full = reason + (detail? (' — '+detail) : '');
+    var b=this; b.disabled=true; b.innerHTML='<span class="spin"></span>';
+    gas('crew_cancel',{ token:S.token, request_id:req.id, reason:full }).then(function(res){
+      if(!res.ok){ b.disabled=false; b.textContent='Cancel my request';
+        if(/session/i.test(res.error||'')){ handleSessionErr(res.error); return; }
+        document.getElementById('err').textContent=res.error||'Could not cancel. Try again.'; return; }
+      showCancelled();
+    });
+  };
+}
+function showCancelled(){
+  S.view='done'; S.mode=null; S.A={}; S.editingId=null;
+  try{ localStorage.removeItem(MKEY); }catch(e){}
+  chrome();
+  app.innerHTML =
+    '<div class="screen center"><span class="big-emoji">👍</span><h2>Request cancelled</h2>'+
+    '<p class="hint">Done — your find-a-team request is cancelled. You can start a new one whenever you’re ready.</p>'+
+    '<div class="row"><button class="btn primary" id="again">Back to start</button></div></div>';
+  document.getElementById('again').onclick = showFork;
 }
 
 /* ── screen: login (email/APA → magic link) ─────────────────────────────── */
@@ -285,6 +373,13 @@ function loadTeamsThenStart(){
 }
 function startSteps(){ S.step=0; renderStep(); }
 
+function ccChips(items, st, sel){          // one grid of chips; single- or multi-select per st.type
+  return items.map(function(o){
+    var on = st.type==='multi' ? (sel||[]).indexOf(o)>=0 : sel===o;
+    return '<button class="chip" role="button" aria-pressed="'+(on?'true':'false')+'" data-v="'+esc(o)+'"><span class="tick">✓</span>'+esc(o)+'</button>';
+  }).join('');
+}
+
 function renderStep(){
   S.view='step';
   var steps = activeSteps();
@@ -292,13 +387,13 @@ function renderStep(){
   var st = steps[S.step];
   chrome();
   var body='';
-  if(st.type==='multi' || st.type==='single-of-areas'){
+  if(st.type==='multi' && st.groups){                         // grouped grid (formats): labeled sections
+    body = st.groups.map(function(g,gi){
+      return '<div class="grp-label'+(gi===0?' first':'')+'">'+esc(g.label)+'</div><div class="chips">'+ccChips(g.items, st, S.A[st.id]||[])+'</div>';
+    }).join('');
+  } else if(st.type==='multi' || st.type==='single' || st.type==='single-of-areas'){
     var opts = st.type==='single-of-areas' ? (S.A.areas||[]) : st.options;
-    var sel = S.A[st.id];
-    body = '<div class="chips">'+ opts.map(function(o){
-      var on = st.type==='multi' ? (sel||[]).indexOf(o)>=0 : sel===o;
-      return '<button class="chip" role="button" aria-pressed="'+(on?'true':'false')+'" data-v="'+esc(o)+'"><span class="tick">✓</span>'+esc(o)+'</button>';
-    }).join('') +'</div>';
+    body = '<div class="chips">'+ccChips(opts, st, S.A[st.id])+'</div>';
   } else if(st.type==='team'){
     body = S.teams.map(function(t){
       var on = String(S.A.team)===String(t.team_id);
@@ -370,6 +465,7 @@ function validateStep(st){
 function fmtVal(id){
   var a=S.A;
   if(id==='days')    return (a.days||[]).join(', ') || 'Flexible';
+  if(id==='max_teams') return a.max_teams || 'No preference';
   if(id==='formats') return (a.formats||[]).join(', ') || 'Any';
   if(id==='areas')   return (a.areas||[]).join(', ');
   if(id==='preferred') return a.preferred || 'No preference';
@@ -402,16 +498,16 @@ function showReview(){
   document.getElementById('submit').onclick = submit;
 }
 function shortLabel(st){
-  return { days:'Nights', formats:'Formats', areas:'Areas', preferred:'First choice',
+  return { days:'Nights', max_teams:'Teams wanted', formats:'Formats', areas:'Areas', preferred:'First choice',
            about:'About you', team:'Team', sl8:'8-Ball SL', sl9:'9-Ball SL', looking:'Looking for' }[st.id] || st.id;
 }
 
 /* ── submit ─────────────────────────────────────────────────────────────── */
 function submit(){
   var b=document.getElementById('submit'); b.disabled=true; b.innerHTML='<span class="spin"></span>';
-  var payload = { token:S.token, kind:S.mode, source:'crewcall-web' };
+  var payload = { token:S.token, kind:S.mode, source:'crewcall-web', request_id:S.editingId||'' };
   if(S.mode==='seeking_team'){
-    payload.days=S.A.days||[]; payload.formats=S.A.formats||[]; payload.areas=S.A.areas||[];
+    payload.days=S.A.days||[]; payload.max_teams=S.A.max_teams||''; payload.formats=S.A.formats||[]; payload.areas=S.A.areas||[];
     payload.preferred_area=S.A.preferred||''; payload.about=S.A.about||'';
   } else {
     payload.team_id=S.A.team;
@@ -422,23 +518,24 @@ function submit(){
   gas('crew_submit', payload).then(function(res){
     b.disabled=false; b.textContent='Send my request';
     if(!res.ok){
+      if(res.existing){ gas('crew_my_open',{token:S.token}).then(function(r2){ if(r2.ok&&r2.request) showManage(r2.request); else { document.getElementById('err').textContent=res.error||'You already have an open request.'; } }); return; }
       if(/session/i.test(res.error||'')){ handleSessionErr(res.error); return; }
       document.getElementById('err').textContent = res.error||'Something went wrong. Try again.'; return;
     }
-    showDone();
+    showDone(res.edited);
   });
 }
-function showDone(){
-  S.view='done'; S.step=0; var wasMode=S.mode; S.mode=null; S.A={};
+function showDone(edited){
+  S.view='done'; S.step=0; var wasMode=S.mode; S.mode=null; S.A={}; S.editingId=null;
   try{ localStorage.removeItem(MKEY); }catch(e){}
   chrome();
   app.innerHTML =
     '<div class="screen center">'+
       '<span class="big-emoji">🎉</span>'+
-      '<h2>You’re all set!</h2>'+
-      '<p class="hint">Your request is in and we emailed you a copy. We’ll help make the connection. '+
+      '<h2>'+(edited?'Request updated!':'You’re all set!')+'</h2>'+
+      '<p class="hint">'+(edited?'Your find-a-team request is updated and we emailed you a copy.':'Your request is in and we emailed you a copy.')+' We’ll help make the connection. '+
         (wasMode==='seeking_player'?'Need another player? Submit a second request below.':'Good luck out there!')+'</p>'+
-      '<div class="row"><button class="btn primary" id="again">Submit another request</button></div>'+
+      '<div class="row"><button class="btn primary" id="again">'+(wasMode==='seeking_player'?'Submit another request':'Back to start')+'</button></div>'+
     '</div>';
   document.getElementById('again').onclick = showFork;
 }
@@ -468,7 +565,7 @@ function boot(){
     S.token=tok; S.signedIn=true; S.firstName=res.first_name||'';
     try{ localStorage.setItem(SKEY, tok); }catch(e){}
     if(S.mode==='seeking_player'){ loadTeamsThenStart(); }
-    else if(S.mode==='seeking_team'){ startSteps(); }
+    else if(S.mode==='seeking_team'){ checkOpenThenStart(); }
     else showFork();
   });
 }
