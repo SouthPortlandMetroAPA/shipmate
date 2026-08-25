@@ -486,8 +486,8 @@ function renderStep(){
   } else if(st.type==='range'){
     var v = S.A[st.id]||{min:'',max:''};
     function optsFor(lo,hi,cur){ var s='<option value="">Any</option>'; for(var i=lo;i<=hi;i++){ s+='<option value="'+i+'"'+(String(cur)===String(i)?' selected':'')+'>SL '+i+'</option>'; } return s; }
-    body = '<div class="range"><select id="mn">'+optsFor(st.lo,st.hi,v.min)+'</select>'+
-           '<span>to</span><select id="mx">'+optsFor(st.lo,st.hi,v.max)+'</select></div>';
+    body = '<div class="range"><select id="mn" aria-label="Lowest skill level">'+optsFor(st.lo,st.hi,v.min)+'</select>'+
+           '<span>to</span><select id="mx" aria-label="Highest skill level">'+optsFor(st.lo,st.hi,v.max)+'</select></div>';
   } else if(st.type==='textarea'){
     body = '<textarea id="ta" maxlength="'+(st.max||1000)+'" placeholder="Type here…">'+esc(S.A[st.id]||'')+'</textarea>';
   }
