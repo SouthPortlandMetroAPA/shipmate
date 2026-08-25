@@ -58,7 +58,8 @@
   .chip[aria-pressed="true"] .tick{ opacity:1; }
   .team{ display:block; width:100%; text-align:left; border:2px solid var(--border); background:#fff; border-radius:14px; padding:14px 16px; margin-top:10px; font:inherit; cursor:pointer; min-height:var(--tap); }
   .team[aria-pressed="true"]{ border-color:var(--spm-accent); background:#eef2ff; }
-  .team b{ display:block; } .team span{ color:var(--muted); font-size:.88rem; }
+  .team b{ display:block; } .team span{ display:block; color:var(--muted); font-size:.88rem; margin-top:2px; }
+  .team-venue{ color:var(--spm-accent); font-weight:600; }
   label.fld{ display:block; font-size:.9rem; color:var(--muted); margin:14px 0 6px; }
   input[type=text],input[type=email],textarea,select{ width:100%; font:inherit; padding:13px 14px; border:2px solid var(--border); border-radius:12px; background:#fff; min-height:var(--tap); color:var(--text); }
   textarea{ min-height:110px; resize:vertical; }
@@ -398,8 +399,10 @@ function renderStep(){
     body = S.teams.map(function(t){
       var on = String(S.A.team)===String(t.team_id);
       var sub = [t.format, t.night_of_play, t.division_name].filter(Boolean).join(' · ');
+      var venue = t.host_location ? ('📍 '+t.host_location) : '';
       return '<button class="team" aria-pressed="'+(on?'true':'false')+'" data-v="'+esc(t.team_id)+'">'+
-        '<b>'+esc(t.team_name||('Team '+t.team_number))+'</b>'+(sub?'<span>'+esc(sub)+'</span>':'')+'</button>';
+        '<b>'+esc(t.team_name||('Team '+t.team_number))+'</b>'+(sub?'<span>'+esc(sub)+'</span>':'')+
+        (venue?'<span class="team-venue">'+esc(venue)+'</span>':'')+'</button>';
     }).join('');
   } else if(st.type==='range'){
     var v = S.A[st.id]||{min:'',max:''};
@@ -470,7 +473,7 @@ function fmtVal(id){
   if(id==='areas')   return (a.areas||[]).join(', ');
   if(id==='preferred') return a.preferred || 'No preference';
   if(id==='about')   return a.about || '—';
-  if(id==='team'){ var t=pickedTeam(); return t?(t.team_name||('Team '+t.team_number)):'—'; }
+  if(id==='team'){ var t=pickedTeam(); if(!t) return '—'; var extra=[t.night_of_play, t.host_location].filter(Boolean).join(' · '); return (t.team_name||('Team '+t.team_number))+(extra?' ('+extra+')':''); }
   if(id==='sl8'||id==='sl9'){ var v=a[id]||{}; if(!v.min && !v.max) return 'Any'; return 'SL '+(v.min||'?')+' to '+(v.max||'?'); }
   if(id==='looking') return a.looking || '—';
   return '';
