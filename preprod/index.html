@@ -301,7 +301,7 @@ function showCancel(req, opts){
     var b=this; b.disabled=true; b.innerHTML='<span class="spin"></span>';
     gas('crew_cancel',{ token:S.token, request_id:req.id, reason:full }).then(function(res){
       if(!res.ok){ b.disabled=false; b.textContent=isPlayer?'Cancel this request':'Cancel my request';
-        if(/session/i.test(res.error||'')){ handleSessionErr(res.error); return; }
+        if(spmAuth.isAuthErr(res.error)){ handleSessionErr(res.error); return; }
         document.getElementById('err').textContent=res.error||'Could not cancel. Try again.'; return; }
       if(isPlayer) refreshPlayerHub('Request cancelled.'); else showCancelled();
     });
@@ -602,7 +602,7 @@ function submit(){
     b.disabled=false; b.textContent='Send my request';
     if(!res.ok){
       if(res.existing){ gas('crew_my_open',{token:S.token}).then(function(r2){ if(r2.ok&&r2.request) showManage(r2.request); else { document.getElementById('err').textContent=res.error||'You already have an open request.'; } }); return; }
-      if(/session/i.test(res.error||'')){ handleSessionErr(res.error); return; }
+      if(spmAuth.isAuthErr(res.error)){ handleSessionErr(res.error); return; }
       document.getElementById('err').textContent = res.error||'Something went wrong. Try again.'; return;
     }
     // seeking_player returns to the manage hub (list → edit / add another) — never a dead-end;
