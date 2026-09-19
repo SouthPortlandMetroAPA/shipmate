@@ -112,11 +112,12 @@
   <footer class="spm-footer">South Portland Metro APA &middot; Have Fun. Meet People. Play Pool.</footer>
 </div>
 
+<script src="https://southportlandmetroapa.github.io/shared/spm-auth.js"></script>
 <script>
 "use strict";
 /* ── config ─────────────────────────────────────────────────────────────── */
 var GAS_URL = 'https://script.google.com/macros/s/AKfycbzGTzkBRTrIIP_tD6sbtOOUmNZkXDdtxPoO4c8fdWt5h3tZFueNSISPv8Q3LWStx73Whw/exec';
-var SKEY = 'crewcall_session';   // durable session token (the magic-link token itself)
+/* session token lives in the SHARED key via spm-auth.js (SSO across every SPM app, 2026-09-18) */
 var MKEY = 'crewcall_mode';      // remember the chosen path across the email round-trip
 
 var DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
@@ -163,8 +164,8 @@ document.getElementById('startOver').onclick = function(){
   showFork();
 };
 document.getElementById('logout').onclick = function(){
-  gas('crew_logout', { token: S.token });
-  try{ localStorage.removeItem(SKEY); localStorage.removeItem(MKEY); }catch(e){}
+  spmAuth.logout(S.token);
+  try{ localStorage.removeItem(MKEY); }catch(e){}
   S.token=null; S.signedIn=false; S.mode=null; S.step=0; S.A={}; S.firstName=''; S.editingId=null;
   showFork();
 };
@@ -300,7 +301,7 @@ function showCancel(req, opts){
     var b=this; b.disabled=true; b.innerHTML='<span class="spin"></span>';
     gas('crew_cancel',{ token:S.token, request_id:req.id, reason:full }).then(function(res){
       if(!res.ok){ b.disabled=false; b.textContent=isPlayer?'Cancel this request':'Cancel my request';
-        if(/session/i.test(res.error||'')){ handleSessionErr(res.error); return; }
+        if(spmAuth.isAuthErr(res.error)){ handleSessionErr(res.error); return; }
         document.getElementById('err').textContent=res.error||'Could not cancel. Try again.'; return; }
       if(isPlayer) refreshPlayerHub('Request cancelled.'); else showCancelled();
     });
@@ -601,7 +602,7 @@ function submit(){
     b.disabled=false; b.textContent='Send my request';
     if(!res.ok){
       if(res.existing){ gas('crew_my_open',{token:S.token}).then(function(r2){ if(r2.ok&&r2.request) showManage(r2.request); else { document.getElementById('err').textContent=res.error||'You already have an open request.'; } }); return; }
-      if(/session/i.test(res.error||'')){ handleSessionErr(res.error); return; }
+      if(spmAuth.isAuthErr(res.error)){ handleSessionErr(res.error); return; }
       document.getElementById('err').textContent = res.error||'Something went wrong. Try again.'; return;
     }
     // seeking_player returns to the manage hub (list → edit / add another) — never a dead-end;
@@ -627,7 +628,7 @@ function showDone(edited){
 
 /* ── session error recovery ─────────────────────────────────────────────── */
 function handleSessionErr(msg){
-  try{ localStorage.removeItem(SKEY); }catch(e){}
+  spmAuth.clear();
   S.token=null; S.signedIn=false;
   showLogin(msg||'Your session expired. Sign in again to finish.');
 }
@@ -635,7 +636,7 @@ function handleSessionErr(msg){
 /* ── boot: resolve session (magic-link token or stored) ─────────────────── */
 function boot(){
   var urlToken = new URLSearchParams(location.search).get('token');
-  var stored = null; try{ stored = localStorage.getItem(SKEY); }catch(e){}
+  var stored = spmAuth.get();
   var tok = urlToken || stored;
   try{ S.mode = localStorage.getItem(MKEY) || null; }catch(e){}
   if(urlToken){ history.replaceState(null,'',location.pathname); }
@@ -643,12 +644,13 @@ function boot(){
   app.innerHTML = '<div class="screen center"><span class="spin"></span><p class="hint" style="margin-top:12px">Signing you in…</p></div>';
   gas('crew_verify', { token:tok }).then(function(res){
     if(!res.ok){
-      try{ localStorage.removeItem(SKEY); }catch(e){}
+      if(!urlToken || spmAuth.isAuthErr(res.error)) spmAuth.clear();
       if(urlToken) showLogin(res.error||'That link didn’t work. Request a fresh one.'); else showFork();
       return;
     }
     S.token=tok; S.signedIn=true; S.firstName=res.first_name||'';
-    try{ localStorage.setItem(SKEY, tok); }catch(e){}
+    spmAuth.set(tok);
+    spmAuth.onChange(function(t){ if((t||'')!==(S.token||'')) location.reload(); });   /* SSO: another app signed in/out */
     if(S.mode==='seeking_player'){ loadTeamsThenHub(); }
     else if(S.mode==='seeking_team'){ checkOpenThenStart(); }
     else showFork();
